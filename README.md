@@ -37,3 +37,25 @@ Ensure you have Python 3.8+ installed. Navigate to the project directory and ins
 
 ```bash
 pip install pyserial numpy pyqtgraph PyQt5
+```
+
+## 🎮 Usage Instructions
+
+1. Clamp your aluminum beam rigidly.
+2. Launch the Digital Twin dashboard:
+```bash
+python digital_twin_app.py
+```
+
+3. Select your microcontroller's COM Port from the top-left dropdown and click **CONNECT DATALINK**.
+4. **1st Mode Test:** Pluck the free tip of the beam. The Time-Domain graph will show both sensors moving in phase, and the FFT will spike at your fundamental frequency (e.g., ~60 Hz).
+5. **2nd Mode Test (Node Forcing):** Lightly pin the 2nd mode node (approx. 78% from the free end) with your finger. Strike the beam at its belly. The Time-Domain graph will instantly invert (sensors moving out of phase), and the FFT will lock onto the high-frequency harmonic (e.g., ~357 Hz).
+
+## 🗂️ Project Structure
+
+* `/vibration_streamer/dual_vibration_streamer.ino`: The high-speed C++ I2C polling script.
+* `/digital_twin_app.py`: The main PyQt5 dashboard and DSP engine.
+
+## 📝 License
+
+This project is open-source and available under the MIT License.
