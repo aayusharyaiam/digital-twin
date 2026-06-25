@@ -2,6 +2,7 @@
 """
 digital_twin_app.py
 Real-Time Dual-Sensor Operational Modal Analysis
+Reverted to Original Fast-Path Signal Processing + Modern UI
 ═══════════════════════════════════════════════════════════════════════
 """
 
@@ -30,17 +31,18 @@ HP_ALPHA = 0.98
 LSB_PER_G = 16384.0        
 
 # ─── MODERN UI PALETTE (Catppuccin Macchiato Inspired) ───────────────
-CLR_BG = "#181825"         # Deep base background
-CLR_PANEL = "#1E1E2E"      # Elevated panel background
-CLR_TEXT = "#CDD6F4"       # Primary text
-CLR_SUBTEXT = "#A6ADC8"    # Secondary text
-CLR_ACCENT = "#CBA6F7"     # Mauve purple for buttons
+CLR_BG = "#181825"         
+CLR_PANEL = "#1E1E2E"      
+CLR_TEXT = "#CDD6F4"       
+CLR_SUBTEXT = "#A6ADC8"    
+CLR_ACCENT = "#CBA6F7"     
 CLR_ACCENT_HOVER = "#B4BEFE" 
-CLR_GRID = "#313244"       # Subtle grid lines
+CLR_GRID = "#313244"       
 CLR_TIP = "#89B4FA"        # Neon Blue for Free End (Tip)
 CLR_MID = "#F38BA8"        # Neon Pink for Middle (Node)
 
 class SerialWorker(QThread):
+    # Reverted to emitting single frames of floats (highly optimized in PyQt)
     data_ready = pyqtSignal(float, float, float, float, float, float)
     connection_status = pyqtSignal(bool)
 
@@ -59,11 +61,17 @@ class SerialWorker(QThread):
         ser = None
         try:
             ser = serial.Serial(self._port, BAUD_RATE, timeout=1)
-            time.sleep(2)  
+            time.sleep(2)  # Wait for Arduino auto-reset
+            
+            # Flush the serial buffer to instantly destroy any laggy/backed-up data
+            ser.reset_input_buffer()
             self.connection_status.emit(True)
+            
             while True:
                 self._mutex.lock()
-                if not self._running: break
+                if not self._running: 
+                    self._mutex.unlock()
+                    break
                 self._mutex.unlock()
 
                 raw_line = ser.readline()
@@ -71,14 +79,17 @@ class SerialWorker(QThread):
                 try:
                     decoded = raw_line.decode("ascii", errors="replace").strip()
                     if not decoded or decoded.startswith("time"): continue
+                    
                     p = decoded.split(",")
                     if len(p) < 7: continue
                     
-                    self.data_ready.emit(
-                        float(p[1])/LSB_PER_G, float(p[2])/LSB_PER_G, float(p[3])/LSB_PER_G,
-                        float(p[4])/LSB_PER_G, float(p[5])/LSB_PER_G, float(p[6])/LSB_PER_G
-                    )
-                except:
+                    # Convert to G's and emit immediately
+                    xt, yt, zt = float(p[1])/LSB_PER_G, float(p[2])/LSB_PER_G, float(p[3])/LSB_PER_G
+                    xm, ym, zm = float(p[4])/LSB_PER_G, float(p[5])/LSB_PER_G, float(p[6])/LSB_PER_G
+                    
+                    self.data_ready.emit(xt, yt, zt, xm, ym, zm)
+                        
+                except Exception:
                     continue
         finally:
             if ser and ser.is_open: ser.close()
@@ -87,7 +98,7 @@ class SerialWorker(QThread):
 class Dashboard(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("⚙ Dual-Sensor Modal Analysis Engine")
+        self.setWindowTitle("⚙ Dual-Sensor Modal Analysis Engine (Ultra-Low Latency)")
         self.resize(1400, 800)
         
         # Apply Modern Stylesheet
@@ -107,16 +118,19 @@ class Dashboard(QMainWindow):
         self._buf_z_tip = deque(maxlen=WINDOW_SIZE)
         self._buf_z_mid = deque(maxlen=WINDOW_SIZE)
         
-        self._prev_raw_t = np.zeros(3); self._prev_hp_t = np.zeros(3)
-        self._prev_raw_m = np.zeros(3); self._prev_hp_m = np.zeros(3)
+        self._prev_raw_t = np.zeros(3)
+        self._prev_hp_t = np.zeros(3)
+        self._prev_raw_m = np.zeros(3)
+        self._prev_hp_m = np.zeros(3)
 
         self._build_ui()
+        
+        # UI Refresh Timer (33ms = ~30 FPS for smooth graphing)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._update_plots)
         self._timer.start(33)
 
     def _build_ui(self):
-        # Top Toolbar
         toolbar = QToolBar()
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
@@ -129,7 +143,6 @@ class Dashboard(QMainWindow):
         toolbar.addWidget(QLabel(" COM PORT  "))
         toolbar.addWidget(self._port_combo)
         
-        # Spacer
         spacer = QWidget()
         spacer.setFixedWidth(20)
         toolbar.addWidget(spacer)
@@ -138,15 +151,14 @@ class Dashboard(QMainWindow):
         self._btn_connect.clicked.connect(self._toggle_conn)
         toolbar.addWidget(self._btn_connect)
         
-        # Central Layout
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(20)
 
-        # Graph configurations
-        pg.setConfigOptions(antialias=True)
+        # Disable Anti-aliasing globally for maximum rendering speed
+        pg.setConfigOptions(antialias=False)
         font = QFont('Segoe UI', 10)
 
         # ─── TIME DOMAIN PLOT ────────────────────────────────────────────────
@@ -164,8 +176,9 @@ class Dashboard(QMainWindow):
         legend = self._plot_time.addLegend(offset=(20, 20))
         legend.setLabelTextColor(CLR_TEXT)
         
-        self._curve_tip_t = self._plot_time.plot(pen=pg.mkPen(CLR_TIP, width=2.5), name=" Tip Sensor (Free End)")
-        self._curve_mid_t = self._plot_time.plot(pen=pg.mkPen(CLR_MID, width=2.5, style=Qt.DashLine), name=" Mid Sensor (Belly)")
+        # Thin lines (width=1.5) for less GPU strain
+        self._curve_tip_t = self._plot_time.plot(pen=pg.mkPen(CLR_TIP, width=1.5), name=" Tip Sensor (Free End)")
+        self._curve_mid_t = self._plot_time.plot(pen=pg.mkPen(CLR_MID, width=1.5, style=Qt.DashLine), name=" Mid Sensor (Belly)")
         layout.addWidget(self._plot_time)
 
         # ─── FFT DOMAIN PLOT ─────────────────────────────────────────────────
@@ -184,11 +197,11 @@ class Dashboard(QMainWindow):
         legend_fft = self._plot_fft.addLegend(offset=(20, 20))
         legend_fft.setLabelTextColor(CLR_TEXT)
         
-        self._curve_tip_f = self._plot_fft.plot(pen=pg.mkPen(CLR_TIP, width=2.5), name=" Tip Power")
-        self._curve_mid_f = self._plot_fft.plot(pen=pg.mkPen(CLR_MID, width=2.5), name=" Mid Power")
+        self._curve_tip_f = self._plot_fft.plot(pen=pg.mkPen(CLR_TIP, width=1.5), name=" Tip Power")
+        self._curve_mid_f = self._plot_fft.plot(pen=pg.mkPen(CLR_MID, width=1.5), name=" Mid Power")
         layout.addWidget(self._plot_fft)
 
-        # ─── STATUS BAR METRICS ──────────────────────────────────────────────
+        # ─── STATUS BAR ──────────────────────────────────────────────────────
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("SYSTEM IDLE. READY TO CONNECT.")
@@ -204,6 +217,7 @@ class Dashboard(QMainWindow):
             self.statusBar.showMessage("DATALINK DISCONNECTED.")
         else:
             self._worker = SerialWorker(self._port_combo.currentText())
+            # Connect the single-frame signal back up
             self._worker.data_ready.connect(self._on_data)
             self._worker.start()
             self._btn_connect.setText("DISCONNECT")
@@ -214,15 +228,14 @@ class Dashboard(QMainWindow):
         raw_t = np.array([xt, yt, zt])
         raw_m = np.array([xm, ym, zm])
         
-        hp_t, hp_m = np.empty(3), np.empty(3)
+        # High-Speed Vectorized Math (No Slow Python For-Loops)
+        hp_t = HP_ALPHA * (self._prev_hp_t + raw_t - self._prev_raw_t)
+        hp_m = HP_ALPHA * (self._prev_hp_m + raw_m - self._prev_raw_m)
         
-        for i in range(3):
-            hp_t[i] = HP_ALPHA * (self._prev_hp_t[i] + raw_t[i] - self._prev_raw_t[i])
-            hp_m[i] = HP_ALPHA * (self._prev_hp_m[i] + raw_m[i] - self._prev_raw_m[i])
+        self._prev_raw_t, self._prev_hp_t = raw_t, hp_t
+        self._prev_raw_m, self._prev_hp_m = raw_m, hp_m
         
-        self._prev_raw_t, self._prev_hp_t = raw_t.copy(), hp_t.copy()
-        self._prev_raw_m, self._prev_hp_m = raw_m.copy(), hp_m.copy()
-        
+        # Focus on the Z-axis (bending up and down)
         self._buf_z_tip.append(hp_t[2]) 
         self._buf_z_mid.append(hp_m[2])
 
@@ -231,11 +244,12 @@ class Dashboard(QMainWindow):
         n = len(self._buf_z_tip)
         if n < 64: return
 
+        # Render time domain
         zt_arr, zm_arr = np.array(self._buf_z_tip), np.array(self._buf_z_mid)
-        
         self._curve_tip_t.setData(zt_arr)
         self._curve_mid_t.setData(zm_arr)
 
+        # Render FFT domain
         win = np.hanning(n)
         fft_t = np.abs(np.fft.rfft(zt_arr * win)) / n
         fft_m = np.abs(np.fft.rfft(zm_arr * win)) / n
@@ -244,6 +258,7 @@ class Dashboard(QMainWindow):
         self._curve_tip_f.setData(freqs, fft_t)
         self._curve_mid_f.setData(freqs, fft_m)
 
+        # Ignore < 5 Hz macro shifts for status bar readout
         min_idx = int(5.0 / (SAMPLE_RATE_HZ / n))
         if len(fft_t) > min_idx:
             pk_t = np.argmax(fft_t[min_idx:]) + min_idx
