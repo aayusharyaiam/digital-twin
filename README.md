@@ -28,9 +28,16 @@ To prevent the sensors from crashing on the shared I2C bus, their hardware addre
 ## 💻 Software Installation
 
 ### 1. The Firmware (C++)
-1. Open `dual_vibration_streamer.ino` in the Arduino IDE.
+
+#### For Arduino:
+1. Open `vibration_streamer/dual_vibration_streamer.ino` in the Arduino IDE.
 2. Flash the code to your microcontroller.
 3. **CRITICAL:** Completely close the Arduino IDE after uploading to free the COM port.
+
+#### For ESP32:
+1. Open `vibration_streamer/esp_dual_vibration_streamer/esp32_6_dof_streamer.ino` in the Arduino IDE.
+2. Ensure you have the ESP32 board manager installed.
+3. Select your ESP32 board, flash the code, and close the Arduino IDE after uploading.
 
 ### 2. The Python Dashboard
 Ensure you have Python 3.8+ installed. Navigate to the project directory and install the required dependencies:
@@ -43,9 +50,16 @@ pip install pyserial numpy pyqtgraph PyQt5
 
 1. Clamp your aluminum beam rigidly.
 2. Launch the Digital Twin dashboard:
-```bash
-python digital_twin_app.py
-```
+
+   - **For Arduino firmware:**
+     ```bash
+     python digital_twin_app.py
+     ```
+   
+   - **For ESP32 firmware:**
+     ```bash
+     python dual_sensor_digital_twin.py
+     ```
 
 3. Select your microcontroller's COM Port from the top-left dropdown and click **CONNECT DATALINK**.
 4. **1st Mode Test:** Pluck the free tip of the beam. The Time-Domain graph will show both sensors moving in phase, and the FFT will spike at your fundamental frequency (e.g., ~60 Hz).
@@ -53,8 +67,10 @@ python digital_twin_app.py
 
 ## 🗂️ Project Structure
 
-* `/vibration_streamer/dual_vibration_streamer.ino`: The high-speed C++ I2C polling script.
-* `/digital_twin_app.py`: The main PyQt5 dashboard and DSP engine.
+* `/vibration_streamer/dual_vibration_streamer.ino`: The high-speed C++ I2C polling script for Arduino.
+* `/vibration_streamer/esp_dual_vibration_streamer/esp32_6_dof_streamer.ino`: The high-speed C++ I2C polling script for ESP32.
+* `/digital_twin_app.py`: The main PyQt5 dashboard and DSP engine for Arduino.
+* `/dual_sensor_digital_twin.py`: The PyQt5 dashboard and DSP engine for ESP32.
 
 ## 📝 License
 
